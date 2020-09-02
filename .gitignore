@@ -1,0 +1,6 @@
+# Ignore objects and binaries
+*.o
+kvm_switcher
+
+# Python stuff
+*.pyc

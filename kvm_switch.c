@@ -2,7 +2,7 @@
  * File name:	kvm_switch.c
  * Copyright:   Daniel Karmark
  * Created:		2018-06-17
- * Modified:	2020-08-31
+ * Modified:	2020-09-02
  * Description: Change KVM source on ActionStar/StarTech KVM (SV231DPU2)
  **/
 
@@ -14,7 +14,7 @@
 #define VID 0x2101
 #define PID 0x1406
 
-libusb_device_handle* hndl;
+libusb_device_handle *hndl;
 
 static int LIBUSB_CALL hotplug_callback_detach(libusb_context *ctx,
         libusb_device *dev, libusb_hotplug_event event, void *user_data)
@@ -29,7 +29,6 @@ static int LIBUSB_CALL hotplug_callback_detach(libusb_context *ctx,
     if (hndl) {
         libusb_close (hndl);
         hndl = NULL;
-        exit(0);
     }
 
     return 0;
@@ -52,10 +51,11 @@ int main()
         return EXIT_FAILURE;
     }
 
-    rc = libusb_hotplug_register_callback(NULL, LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT, 0, VID,
+    rc = libusb_hotplug_register_callback(NULL,
+            LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT, 0, VID,
             PID,LIBUSB_HOTPLUG_MATCH_ANY, hotplug_callback_detach, NULL, &hp);
     if (LIBUSB_SUCCESS != rc) {
-        fprintf (stderr, "Error registering callback 1\n");
+        fprintf (stderr, "Error registering callback\n");
         libusb_exit (NULL);
         return EXIT_FAILURE;
     }
@@ -63,11 +63,11 @@ int main()
     hndl = libusb_open_device_with_vid_pid(NULL, VID, PID);
     if (hndl == NULL) {
         printf("Error opening device\n");
-        return -1;
+        return EXIT_FAILURE;
     }
 
     // Get number of interfaces and detach the kernel driver
-    struct libusb_config_descriptor * cfg;
+    struct libusb_config_descriptor *cfg;
     libusb_get_active_config_descriptor(libusb_get_device(hndl), &cfg);
 
     for (int i = 0; i < cfg->bNumInterfaces; ++i)
@@ -89,6 +89,7 @@ int main()
     uint16_t  	wLength = 5;
     libusb_control_transfer(hndl, bmRequestType, bRequest, wValue, wIndex, data, wLength, 0);
 
+    // Clean-up
     if (cfg) libusb_free_config_descriptor(cfg);
     if (hndl) libusb_close(hndl);
 
