@@ -1,8 +1,9 @@
 use clap::{arg, crate_version, value_parser, Command, Parser, Subcommand};
 use clap_num::{maybe_hex, number_range};
 use comfy_table::Table;
+use core::panic;
 use rusb::{Context, Device, DeviceHandle, Direction, Result, UsbContext};
-use std::time::Duration;
+use std::{error::Error, time::Duration};
 
 // device uid pid are picked directly form `lsusb` result
 const VID: &str = "0x10d5";
@@ -77,6 +78,7 @@ fn print_info(args: Args, kvminfo: &mut KvmInfo) {
 fn main() -> Result<()> {
     let args = Args::parse();
     let mut context = Context::new()?;
+
     let (mut device, mut handle) = open_device(&mut context, args.vendor_id, args.product_id)
         .unwrap_or_else(|| {
             panic!(
@@ -86,7 +88,12 @@ fn main() -> Result<()> {
         });
 
     let mut kvminfo = KvmInfo::default();
-    get_kvm_info(&mut handle, &mut kvminfo)?;
+    let _ = match get_kvm_info(&mut handle, &mut kvminfo) {
+        Ok(_) => true,
+        Err(e) => {
+            panic!("Failed to query KVM:\n{}", e)
+        }
+    };
 
     let endpoints = find_readable_endpoints(&mut device)?;
     let (endpoint, _direction) = endpoints
