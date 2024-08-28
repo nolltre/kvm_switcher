@@ -1,10 +1,12 @@
 use clap::{arg, crate_version, value_parser, Command, Parser, Subcommand};
 use clap_num::{maybe_hex, number_range};
+use comfy_table::Table;
 use rusb::{Context, Device, DeviceHandle, Direction, Result, UsbContext};
 use std::time::Duration;
+
 // device uid pid are picked directly form `lsusb` result
-const VID: u16 = 0x10d5;
-const PID: u16 = 0x55a2;
+const VID: &str = "0x10d5";
+const PID: &str = "0x55a2";
 
 fn between_10_and_60(s: &str) -> std::result::Result<u8, String> {
     number_range(s, 10, 60)
@@ -13,9 +15,9 @@ fn between_10_and_60(s: &str) -> std::result::Result<u8, String> {
 #[derive(Parser)]
 #[command(author, version = crate_version!(), about = "Interact with a Startech SV211HDUA KVM switch", long_about = None)]
 struct Args {
-    #[clap(short, long, help = "vendor id", value_parser=maybe_hex::<u16>, default_value = "0x10d5")]
+    #[clap(short, long, help = "vendor id", value_parser=maybe_hex::<u16>, default_value = VID)]
     vendor_id: u16,
-    #[clap(short, long, help = "product id", value_parser=maybe_hex::<u16>, default_value = "0x55a2")]
+    #[clap(short, long, help = "product id", value_parser=maybe_hex::<u16>, default_value = PID)]
     product_id: u16,
     #[command(subcommand)]
     cmd: Commands,
@@ -45,45 +47,45 @@ enum SetCommands {
         auto_scan: u8,
     },
 }
+
+fn print_info(args: Args, kvminfo: &mut KvmInfo) {
+    let mut table = Table::new();
+    table
+        .set_header(vec!["Description", "Value"])
+        .add_row(vec!["Manufacturer", kvminfo.manufacturer.as_str()])
+        .add_row(vec!["Product", kvminfo.product.as_str()])
+        .add_row(vec![
+            "Vendor ID",
+            (format!("0x{:04x}", args.vendor_id)).as_str(),
+        ])
+        .add_row(vec![
+            "Product ID",
+            format!("0x{:04x}", args.product_id).as_str(),
+        ])
+        .add_row(vec![
+            "Connected computers:",
+            format!("{}", kvminfo.connected_comps).as_str(),
+        ])
+        .add_row(vec![
+            "Connected port:",
+            format!("{}", kvminfo.port_num).as_str(),
+        ]);
+
+    println!("Information about the switch:\n\n{table}");
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
-    match args.cmd {
-        Commands::Port { port } => {
-            println!("Operating on port {port}");
-        }
-        Commands::Info => {
-            println!("Information about the switch!!")
-        }
-        Commands::Set { setcmd } => match setcmd {
-            SetCommands::AutoScan { auto_scan } => {
-                println!("Setting auto scan period to {auto_scan}")
-            }
-            SetCommands::AudioPort { audio_port } => {
-                println!("Fixing audio port to {audio_port}")
-            }
-        },
-    }
-    return Ok(());
-    // Gather command line parameters
-    let matches = Command::new("kvm_switcher")
-        .about("Utility to switch between inputs on a Startech SV211HDUA")
-        .version(crate_version!())
-        .arg(arg!(-p --port <port> "port to switch to").value_parser(value_parser!(u8)))
-        .arg(arg!(-i --info "information about the KVM Switch"))
-        .get_matches();
-
-    if let Some(port) = matches.get_one::<u8>("port") {
-        println!("Switching to port {port}")
-    }
     let mut context = Context::new()?;
-    let (mut device, mut handle) =
-    //let (mut device, mut handle) =
-        open_device(&mut context, VID, PID).unwrap_or_else(||panic!("Failed to open USB device. VID: 0x{:4x} PID: 0x{:04x}", VID, PID));
+    let (mut device, mut handle) = open_device(&mut context, args.vendor_id, args.product_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "Failed to open USB device. VID: 0x{:4x} PID: 0x{:04x}",
+                args.vendor_id, args.product_id
+            )
+        });
 
-    let mut kvminfo = KvmInfo {
-        connected_comps: 0,
-        port_num: 0,
-    };
+    let mut kvminfo = KvmInfo::default();
     get_kvm_info(&mut handle, &mut kvminfo)?;
 
     let endpoints = find_readable_endpoints(&mut device)?;
@@ -100,18 +102,30 @@ fn main() -> Result<()> {
         _ => false,
     };
 
-    println!("Sending magic bytes");
-    send_magic(
-        &mut handle,
-        endpoint.address,
-        matches.get_one::<u8>("port").unwrap(),
-    )?;
     // cleanup after use
     // handle.release_interface(endpoint.iface)?;
     // if has_kernel_driver {
     //     handle.attach_kernel_driver(endpoint.iface)?;
     // }
 
+    match args.cmd {
+        Commands::Port { port } => {
+            println!("Switching to port {port}...");
+            println!("Sending magic bytes");
+            send_magic(&mut handle, endpoint.address, &port)?;
+        }
+        Commands::Info => {
+            print_info(args, &mut kvminfo);
+        }
+        Commands::Set { setcmd } => match setcmd {
+            SetCommands::AutoScan { auto_scan } => {
+                println!("Setting auto scan period to {auto_scan}")
+            }
+            SetCommands::AudioPort { audio_port } => {
+                println!("Fixing audio port to {audio_port}")
+            }
+        },
+    }
     Ok(())
 }
 
@@ -195,10 +209,12 @@ fn open_device<T: UsbContext>(
 * The only bit that could tell us which one it's connected to is the 4th one (0 indexed, 92/b2)
 * We AND that with 0b1001_0000 and bitshift 4 to get the port, e.g. 0x92 AND 0x60 >> 4
 */
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct KvmInfo {
     connected_comps: u8,
     port_num: u8,
+    product: String,
+    manufacturer: String,
 }
 
 fn get_kvm_info<T: UsbContext>(handle: &mut DeviceHandle<T>, kvminfo: &mut KvmInfo) -> Result<()> {
@@ -219,6 +235,12 @@ fn get_kvm_info<T: UsbContext>(handle: &mut DeviceHandle<T>, kvminfo: &mut KvmIn
         let port_num = ((byte_vec[3] >> 5) & 0b0000_0011) + 1; // 0 based so add 1
         kvminfo.connected_comps = connected_comps;
         kvminfo.port_num = port_num;
+        kvminfo.product = handle
+            .read_product_string(language, &device_desc, timeout)
+            .unwrap();
+        kvminfo.manufacturer = handle
+            .read_manufacturer_string(language, &device_desc, timeout)
+            .unwrap();
     }
     Ok(())
 }
