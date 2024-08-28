@@ -1,19 +1,26 @@
 /**
  * File name:	kvm_switch.c
  * Copyright:   Daniel Karmark
- * Created:		2018-06-17
- * Modified:	2020-09-02
- * Description: Change KVM source on ActionStar/StarTech KVM (SV231DPU2) or SV211HDUA
+ * Created:		2024-08-27
+ * Modified:	2024-08-27
+ * Description: Change KVM source on StarTech KVM (SV211HDUA)
  **/
 
+#include <stdio.h> // printf
+#include <wchar.h> // wchar_t
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <libusb-1.0/libusb.h>
 
-#define VID 0x2101
-#define PID 0x1406
+#define VID 0x10d5
+#define PID 0x55a2
 #define CONFIGURATION 1
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <libusb-1.0/libusb.h>
 
 #if !defined VID || !defined PID
 #error "VID and PID need to be set by defining SV231DPU2 or SV211HDUA"
@@ -65,6 +72,7 @@ int main()
         return EXIT_FAILURE;
     }
 
+    libusb_exit(NULL);
     hndl = libusb_open_device_with_vid_pid(NULL, VID, PID);
     if (hndl == NULL) {
         printf("Error opening device\n");
@@ -85,20 +93,17 @@ int main()
         printf("Error setting configuration\n");
     }
 
-  #ifdef HID
     // Send HID request as an interrupt transfer
-    // The HDMI switch sends the first byte as the port, 0 based. I.e. 0 = port 1, n = port (n+1)
-    libusb_
-  # else
+    // The HDMI switch sends a command to the output endpoint on interface 1
+    // Find the output endpoint
     // Send magic data
-    unsigned char data[] = {0x03, 0x5c, 0x04, 0x00, 0x00};
-    uint8_t  	bmRequestType = 0x21;
-    uint8_t  	bRequest = 0x9;
-    uint16_t  	wValue = 0x0203;
-    uint16_t  	wIndex = 1;
-    uint16_t  	wLength = 5;
-    libusb_control_transfer(hndl, bmRequestType, bRequest, wValue, wIndex, data, wLength, 0);
-  #endif
+    unsigned char data[] = {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    /* uint8_t  	bmRequestType = 0x21; */
+    /* uint8_t  	bRequest = 0x9; */
+    /* uint16_t  	wValue = 0x0203; */
+    /* uint16_t  	wIndex = 1; */
+    /* uint16_t  	wLength = 5; */
+    /* libusb_control_transfer(hndl, bmRequestType, bRequest, wValue, wIndex, data, wLength, 0); */
 
     // Clean-up
     if (cfg) libusb_free_config_descriptor(cfg);

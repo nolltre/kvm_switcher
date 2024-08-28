@@ -1,16 +1,20 @@
 CC=gcc
-SRC=$(wildcard *.c)
+SRC=$(wildcard hdmi*.c)
 OBJ=$(SRC:.c=.o)
 CFLAGS=-g
-LDFLAGS=-lusb-1.0
+LDFLAGS=-lusb-1.0 -lhidapi-hidraw
 BINARY=kvm_switcher
+BINARY2=hdmi_kvm_switch
 
-all: $(BINARY)
+all: $(BINARY) $(BINARY2)
 
 %.o: %.c
 	$(CC) -c -o $@ $< $(CFLAGS) $(LDFLAGS)
 
 $(BINARY): $(OBJ)
+	$(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
+
+$(BINARY2): $(OBJ)
 	$(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
 
 release: CFLAGS=-Os -ffunction-sections -fdata-sections

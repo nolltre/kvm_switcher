@@ -1,0 +1,10 @@
+[package]
+name = "kvm_hotkey"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.16", features = ["cargo", "derive"] }
+clap-num = "1.1.1"
+hex = "0.4.3"
+rusb = "0.9"

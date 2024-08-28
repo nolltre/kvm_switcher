@@ -4,3 +4,4 @@ kvm_switcher
 
 # Python stuff
 *.pyc
+.venv/*
