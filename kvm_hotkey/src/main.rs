@@ -1,16 +1,52 @@
-use clap::{arg, crate_version, value_parser, Command, Parser, Subcommand};
+/*
+* The Startech SV211HDUA KVM switch seem to be manufactured by Uniclass. Their product code is
+* UHI-TA2. Many "manufacturers" have products similar or equal to this device, so the software
+* most likely work with others too. YMMV.
+*/
+use clap::{crate_version, Parser, Subcommand};
 use clap_num::{maybe_hex, number_range};
 use comfy_table::Table;
 use core::panic;
 use rusb::{Context, Device, DeviceHandle, Direction, Result, UsbContext};
-use std::{error::Error, time::Duration};
+use std::{time::Duration, u8};
 
 // device uid pid are picked directly form `lsusb` result
 const VID: &str = "0x10d5";
 const PID: &str = "0x55a2";
 
+/// Filter values between 10 and 60
 fn between_10_and_60(s: &str) -> std::result::Result<u8, String> {
     number_range(s, 10, 60)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_value_10() {
+        let s = "10";
+        let result = between_10_and_60(s);
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn test_value_60() {
+        let s = "60";
+        let result = between_10_and_60(s);
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn test_value_less_than_10() {
+        let s = "6";
+        let result = between_10_and_60(s);
+        assert!(result.is_err());
+    }
+    #[test]
+    fn test_value_more_than_60() {
+        let s = "61";
+        let result = between_10_and_60(s);
+        assert!(result.is_err());
+    }
 }
 
 #[derive(Parser)]
@@ -41,10 +77,13 @@ enum Commands {
 #[derive(Subcommand, Debug, Clone)]
 enum SetCommands {
     #[command(about = "fix audio to port", value_parser=clap::value_parser(u8))]
-    AudioPort { audio_port: u8 },
+    AudioPort {
+        #[clap(help = "Once set audio will not follow display")]
+        audio_port: u8,
+    },
     #[command(about = "auto scan period")]
     AutoScan {
-        #[clap(value_parser=between_10_and_60)]
+        #[clap(help="Interval to wait before scanning, in seconds (10-60)", value_parser=between_10_and_60)]
         auto_scan: u8,
     },
 }
@@ -53,6 +92,8 @@ fn print_info(args: Args, kvminfo: &mut KvmInfo) {
     let mut table = Table::new();
     table
         .set_header(vec!["Description", "Value"])
+        .add_row(vec!["Bus", format!("{}", kvminfo.bus).as_str()])
+        .add_row(vec!["Device", format!("{}", kvminfo.device).as_str()])
         .add_row(vec!["Manufacturer", kvminfo.manufacturer.as_str()])
         .add_row(vec!["Product", kvminfo.product.as_str()])
         .add_row(vec![
@@ -64,11 +105,11 @@ fn print_info(args: Args, kvminfo: &mut KvmInfo) {
             format!("0x{:04x}", args.product_id).as_str(),
         ])
         .add_row(vec![
-            "Connected computers:",
+            "Connected computers",
             format!("{}", kvminfo.connected_comps).as_str(),
         ])
         .add_row(vec![
-            "Connected port:",
+            "Connected port",
             format!("{}", kvminfo.port_num).as_str(),
         ]);
 
@@ -87,7 +128,11 @@ fn main() -> Result<()> {
             )
         });
 
-    let mut kvminfo = KvmInfo::default();
+    let mut kvminfo = KvmInfo {
+        bus: device.bus_number(),
+        device: device.address(),
+        ..Default::default()
+    };
     let _ = match get_kvm_info(&mut handle, &mut kvminfo) {
         Ok(_) => true,
         Err(e) => {
@@ -109,12 +154,6 @@ fn main() -> Result<()> {
         _ => false,
     };
 
-    // cleanup after use
-    // handle.release_interface(endpoint.iface)?;
-    // if has_kernel_driver {
-    //     handle.attach_kernel_driver(endpoint.iface)?;
-    // }
-
     match args.cmd {
         Commands::Port { port } => {
             println!("Switching to port {port}...");
@@ -133,6 +172,11 @@ fn main() -> Result<()> {
             }
         },
     }
+
+    // cleanup after use
+    // handle.release_interface(endpoint.iface)?;
+    // handle.attach_kernel_driver(endpoint.iface)?;
+
     Ok(())
 }
 
@@ -222,6 +266,8 @@ struct KvmInfo {
     port_num: u8,
     product: String,
     manufacturer: String,
+    bus: u8,
+    device: u8,
 }
 
 fn get_kvm_info<T: UsbContext>(handle: &mut DeviceHandle<T>, kvminfo: &mut KvmInfo) -> Result<()> {
