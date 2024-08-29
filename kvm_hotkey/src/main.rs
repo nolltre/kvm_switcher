@@ -6,9 +6,8 @@
 use clap::{crate_version, Parser, Subcommand};
 use clap_num::{maybe_hex, number_range};
 use comfy_table::Table;
-use core::panic;
 use rusb::{Context, Device, DeviceHandle, Direction, Result, UsbContext};
-use std::{time::Duration, u8};
+use std::{process::exit, time::Duration};
 
 // device uid pid are picked directly form `lsusb` result
 const VID: &str = "0x10d5";
@@ -106,11 +105,11 @@ fn print_info(args: Args, kvminfo: &mut KvmInfo) {
         ])
         .add_row(vec![
             "Connected computers",
-            format!("{}", kvminfo.connected_comps).as_str(),
+            format!("{:x}", kvminfo.connected_comps).as_str(),
         ])
         .add_row(vec![
             "Connected port",
-            format!("{}", kvminfo.port_num).as_str(),
+            format!("{:x}", kvminfo.port_num).as_str(),
         ]);
 
     println!("Information about the switch:\n\n{table}");
@@ -122,10 +121,11 @@ fn main() -> Result<()> {
 
     let (mut device, mut handle) = open_device(&mut context, args.vendor_id, args.product_id)
         .unwrap_or_else(|| {
-            panic!(
+            eprintln!(
                 "Failed to open USB device. VID: 0x{:4x} PID: 0x{:04x}",
                 args.vendor_id, args.product_id
-            )
+            );
+            exit(1)
         });
 
     let mut kvminfo = KvmInfo {
@@ -133,12 +133,10 @@ fn main() -> Result<()> {
         device: device.address(),
         ..Default::default()
     };
-    let _ = match get_kvm_info(&mut handle, &mut kvminfo) {
-        Ok(_) => true,
-        Err(e) => {
-            panic!("Failed to query KVM:\n{}", e)
-        }
-    };
+    get_kvm_info(&mut handle, &mut kvminfo).unwrap_or_else(|e| {
+        eprintln!("Failed to query KVM: {}", e);
+        exit(1)
+    });
 
     let endpoints = find_readable_endpoints(&mut device)?;
     let (endpoint, _direction) = endpoints
@@ -158,17 +156,26 @@ fn main() -> Result<()> {
         Commands::Port { port } => {
             println!("Switching to port {port}...");
             println!("Sending magic bytes");
-            send_magic(&mut handle, endpoint.address, &port)?;
+            // The logic is inverse, on error means that the device switched (it's no longer on the
+            // bus)
+            if send_magic(&mut handle, endpoint.address, &port).is_err() {
+                println!("Successfully changed to port {}", port)
+            } else {
+                eprintln!("Failed to change to port {}", port);
+                exit(1)
+            }
         }
         Commands::Info => {
             print_info(args, &mut kvminfo);
         }
         Commands::Set { setcmd } => match setcmd {
             SetCommands::AutoScan { auto_scan } => {
-                println!("Setting auto scan period to {auto_scan}")
+                println!("Setting auto scan period to {auto_scan}");
+                println!("UNIMPLEMENTED!")
             }
             SetCommands::AudioPort { audio_port } => {
-                println!("Fixing audio port to {audio_port}")
+                println!("Fixing audio port to {audio_port}");
+                println!("UNIMPLEMENTED!")
             }
         },
     }
@@ -283,9 +290,10 @@ fn get_kvm_info<T: UsbContext>(handle: &mut DeviceHandle<T>, kvminfo: &mut KvmIn
             .unwrap();
 
         let byte_vec = serial_num_str.as_bytes();
-        // println!("{:x?}", byte_vec);
-        let connected_comps = ((byte_vec[1] >> 5) & 0b0000_0011) + 1; // 0 based so add 1
-        let port_num = ((byte_vec[3] >> 5) & 0b0000_0011) + 1; // 0 based so add 1
+        println!("{:x?}", byte_vec);
+        // Best guess, number of bytes determines number of computers connected
+        let connected_comps = (byte_vec[1] >> 4).count_ones() as u8;
+        let port_num = ((byte_vec[3] >> 4) & 0b0000_0111).count_ones() as u8;
         kvminfo.connected_comps = connected_comps;
         kvminfo.port_num = port_num;
         kvminfo.product = handle
